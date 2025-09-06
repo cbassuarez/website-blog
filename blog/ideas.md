@@ -1,8 +1,4 @@
----
-title: IDEAS
-slug: ideas
-type: page
----
+date=2025-04-18 | type=note | slug=ideas | tags=[notes, ideas]
 
 # IDEAS
 
