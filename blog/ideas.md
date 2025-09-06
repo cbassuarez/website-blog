@@ -98,7 +98,3 @@ As a corollary to systemic exclusion, those in power want to stay in power — a
 - Mara Helmuth — [Water Birds](http://www.marahelmuth.com)
 - Don Hertzfeldt — [*EVERYTHING WILL BE OK*](https://www.youtube.com/watch?v=9nG1zsB1O9w)
 - Lailah Arafah — [Sibelius studies: For your solo Sibelius](https://www.youtube.com/watch?v=vUomRA5gHkY)
-
----
-
-*Last updated:* {{DATE}}
