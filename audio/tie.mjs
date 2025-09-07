@@ -1,4 +1,4 @@
-// title: tie-tone — JI plucks (oscillator+envelope)
+// title: tie — JI plucks (oscillator+envelope)
 export async function start({ Tone, params, out }) {
   await Tone.start(); await Tone.loaded();
 
