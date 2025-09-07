@@ -1,10 +1,9 @@
 // title: Warm Fifths (drone)
-// engine: tone
-
-export async function start({Tone, params}) {
-  const vol = new Tone.Volume(-6).toDestination();
-  const polysynth = new Tone.PolySynth(Tone.Synth).connect(vol);
-  const f = Number(params.freq || 110);
-  polysynth.triggerAttack([f, f*1.5]); // A + E
-  return () => polysynth.triggerRelease(['A2','E3']);
+export async function start({ Tone, params, out }) {
+  await Tone.start();
+  const vol = new Tone.Volume(params?.gain ?? -12);
+  vol.connect(out);                               // ← route through the per-run bus
+  const synth = new Tone.PolySynth(Tone.Synth).connect(vol);
+  synth.triggerAttack(['A2','E3']);
+  return () => { try { synth.releaseAll?.(); } catch(_){} try { synth.dispose?.(); } catch(_){} };
 }
