@@ -16,24 +16,56 @@ export async function start({ Tone, params, out }) {
   const vol= new Tone.Volume(gain);
   hp.connect(lp); lp.connect(vol); vol.connect(out);
 
-  // ---------- voice
-  let src;
-  if (wave==='pluck'){ src = new Tone.PluckSynth({ attackNoise: 0.7, dampening: 3800, resonance: .96 }).connect(hp); }
-  else if (wave==='fm'){ src = new Tone.FMSynth().connect(hp); }
-  else { src = new Tone.Synth({ oscillator:{type:'sine'} }).connect(hp); }
-
-  // ---------- JI pitch
+    // ---------- JI pitch
   const hz = jiNoteHz(pitch);
+
+  // ---------- voice (exact-Hz oscillator through envelope)
+  // pick a waveform (pluck ≈ fast-decay sine; fm ≈ mild FM on sine)
+  const shape = (wave === 'square' ? 'square'
+                : wave === 'triangle' ? 'triangle'
+                : 'sine'); // default
+
+  const osc = new Tone.Oscillator({ frequency: hz, type: shape }).start();
+
+  // optional light FM for "fm" flavor (kept subtle for laptop speakers)
+  let fmMod = null, fmGain = null;
+  if (wave === 'fm') {
+    fmMod = new Tone.Oscillator({ frequency: hz * 2, type: 'sine' }).start();
+    fmGain = new Tone.Gain(hz * 0.4);     // index (Hz deviation)
+    fmMod.connect(fmGain); fmGain.connect(osc.frequency);
+  }
+
+  // safety + tone-shaping chain
+  const hp = new Tone.Filter(120, 'highpass');
+  const lp = new Tone.Filter(11000, 'lowpass');
+  const vol = new Tone.Volume(gain);
+  const env = new Tone.AmplitudeEnvelope({
+    attack: 0.004,
+    decay:  wave === 'pluck' ? Math.max(0.06, dur * 0.35) : Math.max(0.02, dur * 0.2),
+    sustain: 0.0,
+    release: 0.02
+  });
+
+  osc.connect(env); env.connect(hp); hp.connect(lp); lp.connect(vol); vol.connect(out);
 
   // ---------- independent clock (no Transport), 60 bpm → 4 s bar
   const barSec = 4;
   const clock = new Tone.Clock((time)=>{
-    src.triggerAttackRelease(hz, dur, time);
-  }, div / barSec); // frequency = events/sec
+    env.triggerAttackRelease(dur, time);
+  }, div / barSec);
 
   clock.start();
-  return () => { try{ clock.stop(); clock.dispose(); src.dispose(); hp.dispose(); lp.dispose(); vol.dispose(); }catch(_){} };
-}
+
+  return () => {
+    try{
+      clock.stop(); clock.dispose();
+      env.dispose(); osc.dispose();
+      if (fmMod) fmMod.dispose();
+      if (fmGain) fmGain.dispose();
+      hp.dispose(); lp.dispose(); vol.dispose();
+    }catch(_){}
+  };
+
 
 /* ---------- helpers (tiny) ---------- */
 function toNum(v, d){ const n=Number(v); return Number.isFinite(n)?n:d; }
