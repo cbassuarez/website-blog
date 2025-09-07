@@ -30,7 +30,7 @@ fun void grain(float hz, float dur, float amp, float panL){
 (1.0 / Math.max(1, GRAINS_PS))::second => dur step;
 
 // regular grain clock
-spork ~ (fun void (){
+fun void grainClock(){
     while(true){
         Std.rand2f(-SPRAY_SEC, SPRAY_SEC)::second => now;
         Math.pow(2.0, Std.rand2f(-JITTER_CT, JITTER_CT)/1200.0) * CENTER_HZ => float hz;
@@ -38,10 +38,10 @@ spork ~ (fun void (){
         spork ~ grain(hz, GRAIN_SEC, 0.11, pan);
         step => now;
     }
-})();
+}
 
 // occasional glitch burst: fast rising sweep of micro grains
-spork ~ (fun void (){
+fun void glitcher(){
     while(true){
         1::second => now;
         if(Std.rand2f(0.0,1.0) < GLITCH_P){
@@ -53,6 +53,9 @@ spork ~ (fun void (){
             }
         }
     }
-})();
+}
+
+spork ~ grainClock();
+spork ~ glitcher();
 
 while(true) 1::second => now;
