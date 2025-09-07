@@ -23,7 +23,7 @@ export async function start({ Tone, params, out }) {
   else { src = new Tone.Synth({ oscillator:{type:'sine'} }).connect(hp); }
 
   // ---------- JI pitch
-  const hz = noteToHz(pitch);
+  const hz = jiNoteHz(pitch);
 
   // ---------- independent clock (no Transport), 60 bpm → 4 s bar
   const barSec = 4;
@@ -38,43 +38,33 @@ export async function start({ Tone, params, out }) {
 /* ---------- helpers (tiny) ---------- */
 function toNum(v, d){ const n=Number(v); return Number.isFinite(n)?n:d; }
 function clampInt(v,min,max){ v=Number(v); v=Math.floor(Number.isFinite(v)?v:min); return Math.max(min, Math.min(max, v)); }
-function noteToHz(note){
-  // Expect: A..G# + octave, e.g. "C4", "F#3"
-  const m = /^([A-G])(#?)(\d)$/.exec(String(note).toUpperCase());
+// JI frequency from letter name (relative to nearest A in the correct octave)
+function jiNoteHz(note){
+  const m = /^([A-G])([b#]?)(\d)$/i.exec(String(note).trim());
   if (!m) return 440;
+  let base = m[1].toUpperCase();
+  const acc = m[2];
+  const oct  = +m[3];
 
-  const name = m[1] + m[2];
-  const oct  = Number(m[3]);
+  // flats → sharps
+  const flatMap = { 'BB':'A#', 'DB':'C#', 'EB':'D#', 'GB':'F#', 'AB':'G#' };
+  if (acc === 'b') base = flatMap[base+'B'] || base;
+  else if (acc === '#') base = base + '#';
 
-  // 5/7-limit hybrid JI ratios relative to A within THE SAME OCTAVE
-  // (ascending from A: A, A#, B, C, C#, D, D#, E, F, F#, G, G#)
-  const JI = {
-    'A': 1/1,
-    'A#': 16/15,  // ~112c
-    'B':  9/8,    // ~204c
-    'C':  6/5,    // ~316c
-    'C#': 5/4,    // ~386c
-    'D':  4/3,    // ~498c
-    'D#': 45/32,  // ~590c (alt. 7/5 if you prefer)
-    'E':  3/2,    // ~702c
-    'F':  8/5,    // ~814c
-    'F#': 5/3,    // ~884c
-    'G':  9/5,    // ~1018c (alt. 7/4 if you prefer)
-    'G#': 15/8    // ~1088c
+  const ratios = {
+    'A': 1/1, 'A#': 16/15, 'B': 9/8, 'C': 6/5, 'C#': 5/4, 'D': 4/3,
+    'D#': 45/32, 'E': 3/2, 'F': 8/5, 'F#': 5/3, 'G': 9/5, 'G#': 15/8
   };
-
-  // Determine which A is the base for this note:
-  // For A/A#/B, base A is the SAME octave; for C..G#, base A is the PREVIOUS octave.
   const order = ['A','A#','B','C','C#','D','D#','E','F','F#','G','G#'];
-  const idx   = order.indexOf(name);
+  const idx   = order.indexOf(base);
+  if (idx < 0) return 440;
+
+  // For A/A#/B, anchor to A of SAME octave; for C..G#, anchor to A of PREV octave
   const baseAOct = (idx <= 2) ? oct : (oct - 1);
-
   const baseAFreq = 440 * Math.pow(2, baseAOct - 4); // A4=440
-  const r = JI[name] || 1;
-
-  return baseAFreq * r;
-  
+  return baseAFreq * (ratios[base] || 1);
 }
+
 function semisFromA4(name, oct){
   const map = {A:0,'A#':1,B:2,C:3,'C#':4,D:5,'D#':6,E:7,F:8,'F#':9,G:10,'G#':11};
   const pc = map[name]; const dOct = oct - 4;
