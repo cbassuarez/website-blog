@@ -1,4 +1,4 @@
-// title: switchyard-tone — phase & swing (JI, tone-only)
+// title: switchyard — phase & swing (JI, tone-only)
 export async function start({ Tone, params, out }) {
   await Tone.start(); await Tone.loaded();
 
