@@ -1,4 +1,4 @@
-// title: basalt.mjs — Amen Beat Repeat (Tone.js) — v1.4.1 (init-order fix)
+// title: basalt — Amen Beat Repeat (Tone.js) — v1.4.1 (init-order fix)
 
 const DEFAULT_URL =
   'https://raw.githubusercontent.com/cbassuarez/website-blog/main/audio/amen/amen.wav';
