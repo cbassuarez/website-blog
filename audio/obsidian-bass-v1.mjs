@@ -1,4 +1,4 @@
-// sounds/obsidian-bass.mjs
+// obsidian-bass-v1.mjs — transport-locked JI bass that follows your drum kit bus
 // Obsidian Bass — transport-locked JI bass that follows your drum kit bus.
 // Exports default async ({ Tone, context, params, out }) => controller
 //
