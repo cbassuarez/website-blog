@@ -1,5 +1,5 @@
-// basalt.mjs — Amen macro-kit (Tone.js) — v1.3.0
-// Default: straight loop (grain-stretch to BPM). Macro (Shift+Space) = momentary grid-quantized FX.
+// basalt.mjs — Amen macro-kit (Tone.js) — v1.3.1
+// Fix: connect players to graph (base → baseGate, fx → wet)
 
 const DEFAULT_URL =
   'https://raw.githubusercontent.com/cbassuarez/website-blog/main/audio/amen/amen.wav';
@@ -54,7 +54,7 @@ export default async function start({ Tone, context, params={}, out }){
 
   const P = {
     url:        params.url || DEFAULT_URL,
-    sourceBPM:  Number(params.src || params.sourceBPM || 135), // ← correct default
+    sourceBPM:  Number(params.src || params.sourceBPM || 135),
     bpm:        Number(params.bpm || 135),
     gain:       Number(params.gain || -12),
     hpf:        Number(params.hpf || 70),
@@ -65,9 +65,9 @@ export default async function start({ Tone, context, params={}, out }){
     freezeLen:  Math.max(0.03, Number(params.freezeLen || 0.18)),
     pattern:    String(params.pattern || 'amen').toLowerCase(),
     swing:      clamp(Number(params.swing || 0), 0, 0.4),
-    slowdown:   Math.max(2, parseInt(params.slowdown || 2,10)), // macro=slow rate divisor
+    slowdown:   Math.max(2, parseInt(params.slowdown || 2,10)),
     map:        String(params.map || 'onset').toLowerCase(),     // onset|grid
-    grid:       clamp(parseInt(params.grid || 16,10)||16, 4, 32),// steps per bar (4/8/12/16/24/32 recommended)
+    grid:       clamp(parseInt(params.grid || 16,10)||16, 4, 32),
     debug:      !!coerce(params.debug || false)
   };
 
@@ -75,7 +75,7 @@ export default async function start({ Tone, context, params={}, out }){
   const gMain = new Tone.Gain(Tone.dbToGain(P.gain));
   const HPF   = new Tone.Filter(P.hpf,'highpass');
   const LPF   = new Tone.Filter(P.lpf,'lowpass');
-  const baseGate = new Tone.Gain(1);           // ← lets us duck base during macro
+  const baseGate = new Tone.Gain(1);           // lets us duck base during macro
   const dry   = new Tone.Gain(1);
   const wet   = new Tone.Gain(0);
   const sum   = new Tone.Gain(1);
@@ -89,6 +89,10 @@ export default async function start({ Tone, context, params={}, out }){
 
   const base = new Tone.GrainPlayer({ loop:true, grainSize:0.05, overlap:0.33, playbackRate:1 });
   const fx   = new Tone.GrainPlayer({ loop:false, grainSize:0.05, overlap:0.33, playbackRate:1 });
+
+  // 🔗 FIX: wire players into the graph
+  base.connect(baseGate);
+  fx.connect(wet);
 
   // load
   const buf = await loadAudioBuffer(Tone, P.url);
@@ -118,14 +122,13 @@ export default async function start({ Tone, context, params={}, out }){
   }
   applyCrush();
 
-  // ── GRID engine ──────────────────────────────────────────────────────────────
-  const stepsPerBeatFactor = (grid)=> (grid/4); // grid steps per beat
+  // GRID helpers
+  const stepsPerBeatFactor = (grid)=> (grid/4);
   function gridHz(){ return (clamp(P.bpm,30,220)/60) * stepsPerBeatFactor(gridN); }
   function stepDurationSec(){ return 1 / gridHz(); }
   function currentStepIndexNow(){
-    const t = Tone.now() - baseStartAt; // seconds since base start
-    const idxF = t * gridHz();
-    return Math.floor(idxF);
+    const t = Tone.now() - baseStartAt;
+    return Math.floor(t * gridHz());
   }
   function timeUntilNextStep(){
     const t = Tone.now() - baseStartAt;
@@ -133,7 +136,6 @@ export default async function start({ Tone, context, params={}, out }){
     return (1 - phase) / gridHz();
   }
   function stepStartOffset(stepIdx){
-    // map step index to buffer offset: uniform grid
     const N = gridN;
     const frac = ((stepIdx % N) + N) % N / N;
     return frac * duration;
@@ -161,24 +163,20 @@ export default async function start({ Tone, context, params={}, out }){
   function onStep(baseTime){
     if(!macroOn) return;
 
-    // swing on odd steps
     const isOdd = (stepIdx % 2) === 1;
     const sd = stepDurationSec();
     const swingDelay = isOdd ? (P.swing * 0.5 * sd) : 0;
     const t = baseTime + swingDelay;
 
-    // step-aligned offsets
     const stepOff = stepStartOffset(stepIdx);
     const stepLen = duration / gridN;
 
     switch(P.macro){
       case 'freeze': {
-        // tiny grain right at the current step boundary
         scheduleFXTap(t, stepOff, Math.min(P.freezeLen, stepLen*0.9), false);
         break;
       }
       case 'stutter': {
-        // use nearest onset around this step (keeps kick/snare accents)
         const s = nearestOnsetToOffset(stepOff);
         const d = Math.min(P.freezeLen, s.dur);
         scheduleFXTap(t, s.start, d, false);
@@ -188,7 +186,6 @@ export default async function start({ Tone, context, params={}, out }){
         const pat = PATTERNS[P.pattern] || PATTERNS.amen;
         const pick = pat[stepIdx % pat.length];
         if (pick != null){
-          // pattern is in 16ths; remap to current grid by ratio
           const off = stepStartOffset(Math.floor(pick * (gridN/16)));
           const d   = Math.min(P.freezeLen, duration / gridN);
           scheduleFXTap(t, off, d, false);
@@ -197,15 +194,12 @@ export default async function start({ Tone, context, params={}, out }){
       }
       case 'screw':
       case 'invert': {
-        // classic chopped-screw: reversed grains ON GRID + pitch down base immediately
         const d = Math.min(P.freezeLen, stepLen);
         scheduleFXTap(t, stepOff + Math.min(d*0.95, stepLen*0.95), d, true);
-        // optional second micro-tap a hair later for smear
         scheduleFXTap(t + d*0.95, stepOff + Math.min(d*1.9, stepLen*0.95), d*0.9, true);
         break;
       }
       case 'slow': {
-        // immediate rate division while held
         const newRate = rateBase / Math.max(2, P.slowdown);
         if (Math.abs(base.playbackRate - newRate) > 1e-4){
           base.playbackRate = newRate;
@@ -232,17 +226,14 @@ export default async function start({ Tone, context, params={}, out }){
     if(macroOn) return;
     macroOn = true;
 
-    // grid-quantized start + sync step index
     stepIdx = currentStepIndexNow();
     const delay = timeUntilNextStep();
     clk.frequency.value = gridHz();
     clk.start(Tone.now() + delay);
 
-    // duck base for all macros except slow (so chops are obvious)
     if (P.macro !== 'slow'){
-      baseGate.gain.rampTo(0.12, 0.03); // leave a whisper of the loop
+      baseGate.gain.rampTo(0.12, 0.03);
     }
-    // screw = immediate pitch drop (-12 semitones)
     if (P.macro === 'screw'){
       base.playbackRate = rateBase * 0.5;
     }
@@ -254,7 +245,6 @@ export default async function start({ Tone, context, params={}, out }){
     macroOn = false;
     clk.stop();
 
-    // restore base
     baseGate.gain.rampTo(1, 0.05);
     if (P.macro === 'slow' || P.macro === 'screw'){
       base.playbackRate = rateBase;
@@ -263,7 +253,7 @@ export default async function start({ Tone, context, params={}, out }){
   window.addEventListener('keydown', onDown, true);
   window.addEventListener('keyup',   onUp,   true);
 
-  if(P.debug) console.log('[basalt v1.3] ready', {bpm:P.bpm, sourceBPM:P.sourceBPM, grid:gridN});
+  if(P.debug) console.log('[basalt v1.3.1] ready', {bpm:P.bpm, sourceBPM:P.sourceBPM, grid:gridN});
 
   // controller
   const controller = async function stop(){
@@ -286,7 +276,6 @@ export default async function start({ Tone, context, params={}, out }){
     LPF.frequency.rampTo(clamp(P.lpf,200,20000), 0.05);
     applyCrush();
 
-    // bpm/grid changes
     const newRate = clamp(P.bpm,30,220) / Math.max(30, P.sourceBPM);
     if (P.macro!=='slow' && P.macro!=='screw') base.playbackRate = newRate;
 
