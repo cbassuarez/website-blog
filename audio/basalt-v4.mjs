@@ -1,5 +1,5 @@
-// basalt.mjs — Amen macro-kit (Tone.js) — v1.3.1
-// Fix: connect players to graph (base → baseGate, fx → wet)
+// basalt.mjs — Amen macro-kit (Tone.js) — v1.3.2
+// Fix: separate FX bus from crush bus + add fxGain(dB) + gentler ducking.
 
 const DEFAULT_URL =
   'https://raw.githubusercontent.com/cbassuarez/website-blog/main/audio/amen/amen.wav';
@@ -15,7 +15,7 @@ const AMEN_ONSETS = [
 const PATTERNS = {
   amen:  [0,1,2,3,4,5,6,7, 8,9,10,11, 12,13,14,15],
   half:  [0,null,4,null, 8,null,12,null],
-  sparse:[0,null,2,null, 4,null,6,null, 8,null,10,null, 12,null,14,null],
+  sparse:[0,null,2,null, 4,null,6=null, 8,null,10,null, 12,null,14,null].map((v,i)=>v??null), // safe fill
   fill:  [0,1,2,3,4,5,6,7, 8,9,10,11, 12,13,14,15, 15,14,13,12, 11,10,9,8, 7,6,5,4, 3,2,1,0]
 };
 
@@ -59,6 +59,11 @@ export default async function start({ Tone, context, params={}, out }){
     gain:       Number(params.gain || -12),
     hpf:        Number(params.hpf || 70),
     lpf:        Number(params.lpf || 11000),
+
+    // NEW: independent gains
+    fxGain:     Number(params.fxGain || 6),   // dB boost for chopped taps
+    duck:       clamp(Number(params.duck ?? 0.35), 0, 1), // base loop level while macro is held
+
     crush:      clamp(Number(params.crush || 0), 0, 1),
 
     macro:      String(params.macro || params.mode || 'freeze').toLowerCase(), // freeze|stutter|chop|slow|screw|invert
@@ -75,24 +80,32 @@ export default async function start({ Tone, context, params={}, out }){
   const gMain = new Tone.Gain(Tone.dbToGain(P.gain));
   const HPF   = new Tone.Filter(P.hpf,'highpass');
   const LPF   = new Tone.Filter(P.lpf,'lowpass');
-  const baseGate = new Tone.Gain(1);           // lets us duck base during macro
-  const dry   = new Tone.Gain(1);
-  const wet   = new Tone.Gain(0);
-  const sum   = new Tone.Gain(1);
-  const crusher = new Tone.BitCrusher({ bits:8 });
 
+  const baseGate = new Tone.Gain(1);     // lets us duck base during macro
+  const dry      = new Tone.Gain(1);
+
+  // NEW: *separate* FX bus (for chopped/granular taps) and CRUSH bus (parallel distortion)
+  const fxBus    = new Tone.Gain(1);     // level of manipulated audio
+  const crushBus = new Tone.Gain(0);     // amount of parallel crushed signal from base
+
+  const sum      = new Tone.Gain(1);
+  const crusher  = new Tone.BitCrusher({ bits:8 });
+
+  // wiring
   baseGate.connect(dry);
-  baseGate.connect(wet);
-  wet.connect(crusher).connect(sum);
+  baseGate.connect(crushBus);                 // base → crush path (parallel)
+  crushBus.connect(crusher).connect(sum);     // crush mix
+  fxBus.connect(sum);                         // manipulated audio goes straight to sum
   dry.connect(sum);
   sum.connect(HPF).connect(LPF).connect(gMain).connect(out);
 
-  const base = new Tone.GrainPlayer({ loop:true, grainSize:0.05, overlap:0.33, playbackRate:1 });
+  // sources
+  const base = new Tone.GrainPlayer({ loop:true,  grainSize:0.05, overlap:0.33, playbackRate:1 });
   const fx   = new Tone.GrainPlayer({ loop:false, grainSize:0.05, overlap:0.33, playbackRate:1 });
 
-  // 🔗 FIX: wire players into the graph
+  // connect sources
   base.connect(baseGate);
-  fx.connect(wet);
+  fx.connect(fxBus);
 
   // load
   const buf = await loadAudioBuffer(Tone, P.url);
@@ -115,12 +128,18 @@ export default async function start({ Tone, context, params={}, out }){
     const off = (t * rateBase) % duration;
     return off<0 ? off+duration : off;
   }
+
+  // levels
   function applyCrush(){
     const bits = Math.round(8 - 5*clamp(P.crush,0,1));
     crusher.bits = clamp(bits,3,8);
-    wet.gain.rampTo(clamp(P.crush,0,1), 0.05);
+    crushBus.gain.rampTo(clamp(P.crush,0,1), 0.05);   // ONLY affects parallel crushed base
+  }
+  function applyFxGain(){
+    fx.volume.value = Number(P.fxGain) || 0;          // dB
   }
   applyCrush();
+  applyFxGain();
 
   // GRID helpers
   const stepsPerBeatFactor = (grid)=> (grid/4);
@@ -231,9 +250,10 @@ export default async function start({ Tone, context, params={}, out }){
     clk.frequency.value = gridHz();
     clk.start(Tone.now() + delay);
 
-    if (P.macro !== 'slow'){
-      baseGate.gain.rampTo(0.12, 0.03);
-    }
+    // NEW: gentler duck + ensure FX bus is fully open
+    baseGate.gain.rampTo(clamp(P.duck, 0, 1), 0.03);
+    fxBus.gain.rampTo(1, 0.01);
+
     if (P.macro === 'screw'){
       base.playbackRate = rateBase * 0.5;
     }
@@ -253,14 +273,14 @@ export default async function start({ Tone, context, params={}, out }){
   window.addEventListener('keydown', onDown, true);
   window.addEventListener('keyup',   onUp,   true);
 
-  if(P.debug) console.log('[basalt v1.3.1] ready', {bpm:P.bpm, sourceBPM:P.sourceBPM, grid:gridN});
+  if(P.debug) console.log('[basalt v1.3.2] ready', {bpm:P.bpm, sourceBPM:P.sourceBPM, grid:gridN, fxGain:P.fxGain, duck:P.duck});
 
   // controller
   const controller = async function stop(){
     try{ clk.stop(); }catch(_){}
     try{ base.stop(); fx.stop(); }catch(_){}
     try{ base.dispose(); fx.dispose(); }catch(_){}
-    try{ crusher.dispose(); dry.dispose(); wet.dispose(); sum.dispose(); }catch(_){}
+    try{ crusher.dispose(); dry.dispose(); fxBus.dispose(); crushBus.dispose(); sum.dispose(); }catch(_){}
     try{ HPF.dispose(); LPF.dispose(); gMain.dispose(); baseGate.dispose(); }catch(_){}
     try{
       window.removeEventListener('keydown', onDown, true);
@@ -275,6 +295,7 @@ export default async function start({ Tone, context, params={}, out }){
     HPF.frequency.rampTo(clamp(P.hpf,20,2000), 0.05);
     LPF.frequency.rampTo(clamp(P.lpf,200,20000), 0.05);
     applyCrush();
+    applyFxGain();
 
     const newRate = clamp(P.bpm,30,220) / Math.max(30, P.sourceBPM);
     if (P.macro!=='slow' && P.macro!=='screw') base.playbackRate = newRate;
