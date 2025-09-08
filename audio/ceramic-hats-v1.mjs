@@ -1,116 +1,128 @@
-// ceramic-hats.mjs
-// Metallic closed hats using Tone.MetalSynth, grid/step or density.
+// title: ceramic-hats (Tone; noise+metal mix, pattern or density)
+// engine: tone
+export async function start({ Tone, params = {}, out }) {
+  await Tone.start();
+  await Tone.loaded?.();
 
-export default async function start({ Tone, context, params = {}, out }) {
-  const P = {
-    grid: '16n',
-    pattern: 'x-x-x-x-x-x-x-x-',
-    density: 1.0,      // used when pattern === ''
-    seed: 0,
-    // tone / env
-    freq: 8_000,       // synth frequency-ish (MetalSynth uses harmonic model)
-    res: 600,          // resonance (Q-like)
-    modIndex: 8,
-    harmonicity: 5.1,
-    decay: 0.06,
-    // mix
-    hp: 6_500,
-    lpf: 18_000,
-    gain: -10,         // dB
-    drive: 0.0,
-    humanize: 0.002,
-    accent: 0.15
-  };
-  Object.assign(P, params || {});
-  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-  const db2gain = (db) => Math.pow(10, db/20);
-
-  // synth
-  const hat = new Tone.MetalSynth({
-    frequency: clamp(P.freq, 400, 12000),
-    envelope: { attack: 0.001, decay: clamp(P.decay, 0.01, 0.3), release: 0.03 },
-    resonance: clamp(P.res, 50, 700),
-    harmonicity: clamp(P.harmonicity, 0.5, 12),
-    modulationIndex: clamp(P.modIndex, 0.1, 40),
-    volume: -6
-  });
-
-  // fx/mix
-  const hp = new Tone.Filter(clamp(P.hp, 1000, 18000), 'highpass');
-  const shaper = new Tone.Distortion(clamp(P.drive, 0, 1));
-  const lp = new Tone.Filter(clamp(P.lpf, 500, 20000), 'lowpass');
-  const vol = new Tone.Gain(db2gain(P.gain));
-  hat.chain(hp, shaper, lp, vol);
-  if (out && out.connect) vol.connect(out);
-
-  // seq
-  let seq = null, step = 0;
-  let rng = P.seed >>> 0;
-  const rnd = () => (rng = (rng ^ (rng << 13)) >>> 0, rng = (rng ^ (rng >>> 17)) >>> 0, rng = (rng ^ (rng << 5)) >>> 0, (rng>>>0)/4294967296);
-  const parse = (s) => {
-    const a = String(s||'').replace(/\s+/g,'');
-    return a ? [...a].map(c => (c==='X'?'X':(c==='x'||c==='o')?'x':'-')) : null;
-  };
-  let pat = parse(P.pattern);
-
-  function trig(time, acc=false){
-    const j = (Math.random() - 0.5) * 2 * (P.humanize || 0);
-    const t = time + j;
-    try { hat.set({
-      frequency: clamp(P.freq, 400, 12000),
-      envelope: { attack: 0.001, decay: clamp(P.decay, 0.01, 0.3), release: 0.03 },
-      resonance: clamp(P.res, 50, 700),
-      harmonicity: clamp(P.harmonicity, 0.5, 12),
-      modulationIndex: clamp(P.modIndex, 0.1, 40),
-    }); } catch(_){}
-    const vel = clamp(0.75 + (acc ? P.accent : 0), 0, 1);
-    try { hat.triggerAttackRelease('32n', t, vel); } catch(_){}
+  // Make sure the clock is actually running.
+  if (Tone.Transport.state !== 'started') {
+    try { Tone.Transport.start('+0.02'); } catch(_) {}
   }
 
-  function rebuild(){
-    if (seq) { try{ seq.stop(0); seq.dispose(); }catch(_){ } seq = null; }
-    pat = parse(P.pattern);
-    step = 0;
-    if (pat){
-      seq = new Tone.Loop((time)=>{
-        const ch = pat[step % pat.length];
-        if (ch==='x'||ch==='X') trig(time, ch==='X');
-        step++;
-      }, P.grid);
-    } else {
-      seq = new Tone.Loop((time)=>{
-        const p = clamp(P.density, 0, 1);
-        const r = P.seed ? rnd() : Math.random();
-        if (r < p) trig(time, false);
-        step++;
-      }, P.grid);
-    }
-    seq.start(0);
-  }
-  rebuild();
+  /* ---------- parse ---------- */
+  const toNum   = (v, d)=> (Number.isFinite(+v) ? +v : d);
+  const clamp01 = (x)=> Math.max(0, Math.min(1, +x||0));
+  const clampI  = (x,lo,hi)=> Math.max(lo, Math.min(hi, Math.floor(+x||0)));
 
-  const controller = async function stop(){
-    try{ seq && seq.stop(0); seq && seq.dispose(); }catch(_){}
-    [hat,hp,shaper,lp,vol].forEach(n=>{ try{ n.dispose && n.dispose(); }catch(_){ }});
+  const pos = Array.isArray(params._) ? params._ : [];
+  const gainDb = toNum(params.gain, -10);
+  const mode   = String(params.mode || 'pattern');           // 'pattern' | 'dens'
+  const stepsIn= String(params.pattern ?? params.steps ?? 'x.x.x.x.x.x.x.x.').replace(/\s+/g,'');
+  const len    = clampI(params.len ?? params.length ?? stepsIn.length || 16, 1, 64);
+  const dens   = clamp01(toNum(params.density, 0.6));
+  const swing  = clamp01(toNum(params.swing, 0));            // 0..1
+  const tone   = toNum(params.tone, 9000);                   // bandpass Hz
+  const hpCut  = toNum(params.hp, 6000);                     // highpass Hz
+  const metalVol = toNum(params.metal, -14);                 // dB for metal layer
+  const tickDiv  = String(params.div || '16n');              // grid
+
+  /* ---------- audio chain ---------- */
+  const hp  = new Tone.Filter(hpCut, 'highpass');
+  const bp  = new Tone.Filter(tone, 'bandpass', { Q: 1 });
+  const vol = new Tone.Volume(gainDb);
+  hp.connect(bp); bp.connect(vol); vol.connect(out);
+
+  // noise layer (crisp hats)
+  const noise = new Tone.Noise('white').start();
+  const env   = new Tone.AmplitudeEnvelope({ attack:0.001, decay:0.045, sustain:0, release:0.02 });
+  noise.connect(env).connect(hp);
+
+  // metallic ping layer (adds ceramic ping)
+  const metal = new Tone.MetalSynth({
+    frequency: 500,
+    envelope: { attack: 0.001, decay: 0.06, release: 0.01 },
+    harmonicity: 5.1, modulationIndex: 8.5, resonance: 1100, octaves: 1.6,
+    volume: metalVol
+  }).connect(hp);
+
+  // groove
+  Tone.Transport.swingSubdivision = '16n';
+  Tone.Transport.swing = swing;
+
+  /* ---------- state ---------- */
+  const state = {
+    mode,
+    steps: stepsIn.padEnd(len, '.').slice(0, len),
+    len, dens,
+    swing, tone, hpCut, metalVol, div: tickDiv
   };
-  controller.update = (patch={})=>{
-    Object.assign(P, patch||{});
-    if (patch.pattern!==undefined || patch.grid!==undefined || patch.density!==undefined || patch.seed!==undefined) rebuild();
-    if (patch.freq!==undefined || patch.res!==undefined || patch.modIndex!==undefined || patch.harmonicity!==undefined || patch.decay!==undefined){
-      hat.set({
-        frequency: clamp(P.freq, 400, 12000),
-        resonance: clamp(P.res, 50, 700),
-        modulationIndex: clamp(P.modIndex, 0.1, 40),
-        harmonicity: clamp(P.harmonicity, 0.5, 12),
-        envelope: { attack: 0.001, decay: clamp(P.decay, 0.01, 0.3), release: 0.03 }
-      });
+
+  /* ---------- sequencer ---------- */
+  let i = 0;
+  const loop = new Tone.Loop((time) => {
+    const hit = (state.mode === 'pattern')
+      ? ((state.steps[i % state.len] || '.') !== '.')
+      : (Math.random() < state.dens);
+
+    i++;
+
+    if (!hit) return;
+
+    const vel = 0.6 + Math.random() * 0.35;          // humanize amplitude
+    env.triggerAttackRelease(0.065, time, vel);
+    metal.triggerAttackRelease('32n', time, vel);
+  }, tickDiv).start(0);
+
+  /* ---------- controller (stop + live update) ---------- */
+  const controller = async () => {
+    try { loop.stop(); loop.dispose(); } catch(_) {}
+    try { noise.stop(); noise.dispose(); } catch(_) {}
+    try { env.dispose(); } catch(_) {}
+    try { metal.dispose(); } catch(_) {}
+    try { hp.dispose(); bp.dispose(); vol.dispose(); } catch(_) {}
+  };
+
+  controller.update = (patch = {}) => {
+    if ('pattern' in patch || 'steps' in patch) {
+      const s = String(patch.pattern ?? patch.steps ?? '').replace(/\s+/g,'');
+      if (s) { state.steps = s; state.mode = 'pattern'; }
     }
-    if (patch.hp!==undefined) hp.frequency.rampTo(clamp(P.hp, 1000, 18000), 0.03);
-    if (patch.drive!==undefined) shaper.distortion = clamp(P.drive, 0, 1);
-    if (patch.lpf!==undefined) lp.frequency.rampTo(clamp(P.lpf, 500, 20000), 0.03);
-    if (patch.gain!==undefined) vol.gain.rampTo(db2gain(P.gain), 0.02);
-    return true;
+    if ('density' in patch || 'dens' in patch) {
+      state.dens = clamp01(patch.density ?? patch.dens);
+      state.mode = 'dens';
+    }
+    if ('len' in patch || 'length' in patch) {
+      state.len = clampI(patch.len ?? patch.length, 1, 64);
+      state.steps = state.steps.padEnd(state.len, '.').slice(0, state.len);
+    }
+    if ('swing' in patch) {
+      state.swing = clamp01(patch.swing);
+      Tone.Transport.swing = state.swing;
+    }
+    if ('tone' in patch) {
+      state.tone = toNum(patch.tone, state.tone);
+      try { bp.frequency.rampTo(state.tone, 0.03); } catch(_) { bp.frequency.value = state.tone; }
+    }
+    if ('hp' in patch) {
+      state.hpCut = toNum(patch.hp, state.hpCut);
+      try { hp.frequency.rampTo(state.hpCut, 0.03); } catch(_) { hp.frequency.value = state.hpCut; }
+    }
+    if ('metal' in patch) {
+      state.metalVol = toNum(patch.metal, state.metalVol);
+      try { metal.volume.rampTo(state.metalVol, 0.03); } catch(_) { metal.volume.value = state.metalVol; }
+    }
+    if ('gain' in patch) {
+      const g = toNum(patch.gain, gainDb);
+      try { vol.volume.rampTo(g, 0.03); } catch(_) { vol.volume.value = g; }
+    }
+    if ('div' in patch) {
+      const want = String(patch.div || '16n');
+      if (want !== state.div) {
+        state.div = want;
+        try { loop.interval = want; } catch(_) {}
+      }
+    }
   };
-  controller.params = ()=>({ ...P });
+
   return controller;
 }
