@@ -1,6 +1,6 @@
 date=2025-09-08 | type=CLASS | slug=aboutme1 | tags=[dev, console, changelog]
 
-# aboutme1
+# ABOUT ME: SEB SUAREZ
 
 **Today’s first half (45 min)** introduces who I am, what I make, and the values that shape this class. If you’re skimming, start with the **Agenda** and **Three Works**.
 
@@ -15,7 +15,7 @@ date=2025-09-08 | type=CLASS | slug=aboutme1 | tags=[dev, console, changelog]
 5. Live peek: **/sounds** (8)
 6. Why this class: culture & expectations (9)
 
-> Links we’ll reference: [/about](/about) · [/works](/works) · [/sounds](/sounds)
+> Links we’ll reference: [/about](https://cbassuarez.com/#about) · [/works](https://cbassuarez.com/#ls/works) · [/sounds](https://cbassuarez.com/#ls/sounds)
 
 ---
 
@@ -46,7 +46,7 @@ Today mirrors that structure: this page (About & Practice) → then a **Creative
 ### 1) CONSTRUCTIONS — light-and-sound as instrument
 **What:** Oversized light sculptures (e.g., low-pressure sodium, ST64 incandescent), custom bases, and live manipulation.  
 **Why it matters here:** Treats lighting as a **time-based performance object**; asks how city infrastructure can become chamber music.  
-**See:** [/works](/works) → *Constructions*  
+**See:** [/works](https://cbassuarez.com/#w/constructions) → *Constructions*  
 **Themes:** performance systems · audience agency · choreographing attention
 
 ---
@@ -54,7 +54,7 @@ Today mirrors that structure: this page (About & Practice) → then a **Creative
 ### 2) Dex Digital Sample Library (DexDSL) — open access, CC-BY
 **What:** A nonprofit sample library of **beds, textures, instruments**, plus residencies and education outreach.  
 **Why it matters here:** Models **public tooling**, clean licensing, and sustainable open culture.  
-**See:** [/works](/works) → *DexDSL*  
+**See:** [/works](dexdsl.com) → *DexDSL*  
 **Themes:** authorship · distribution · community infrastructure
 
 ---
@@ -62,7 +62,6 @@ Today mirrors that structure: this page (About & Practice) → then a **Creative
 ### 3) Optics & Photonics Music System — mapping sound ↔ light
 **What:** A three-part system: (1) pitches mapped to **visible wavelengths**, (2) actuators controlling mirrors/filters, (3) a physical optics track.  
 **Why it matters here:** Reframes orchestration as **beam routing** and spatial composition.  
-**See:** [/works](/works) → *Optics/Photonics*  
 **Themes:** mapping · embodiment · readable complexity
 
 ---
