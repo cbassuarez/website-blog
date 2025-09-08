@@ -1,5 +1,5 @@
 ---
-title: "Class 1 · About Me & Practice (45 min)"
+title: "aboutme1"
 subtitle: "Where sound, light, and space meet"
 tags: [class, lesson, about, practice]
 ---
