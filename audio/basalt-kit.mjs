@@ -46,7 +46,7 @@ export async function start({ Tone, params={}, out }) {
   crushWet.connect(crush); // we’ll feed player into both dryTap and crushWet
 
   /* ---------- sample player (GrainPlayer for time-stretch) ---------- */
-  const defaultUrl = 'https://raw.githubusercontent.com/cbassuarez/website-blog/main/audio/amen/amen.wav';
+  const defaultUrl = 'https://drive.google.com/file/d/13n8UWPSfY-Oy2mtZaj_DNv_RV-mME6Pc/';
   const url = String(get('url', defaultUrl));
 
   const player = new Tone.GrainPlayer({
