@@ -1,8 +1,4 @@
----
-title: "aboutme1"
-subtitle: "Where sound, light, and space meet"
-tags: [class, lesson, about, practice]
----
+date=2025-09-08 | type=CLASS | slug=aboutme1 | tags=[dev, console, changelog]
 
 # aboutme1
 
