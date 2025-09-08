@@ -4,7 +4,7 @@ subtitle: "Where sound, light, and space meet"
 tags: [class, lesson, about, practice]
 ---
 
-# Class 1 · About Me & Practice
+# aboutme1
 
 **Today’s first half (45 min)** introduces who I am, what I make, and the values that shape this class. If you’re skimming, start with the **Agenda** and **Three Works**.
 
