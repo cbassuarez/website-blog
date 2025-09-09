@@ -69,22 +69,8 @@
     // choose reasonable default
     presets.live();
 
-    // ---- DOM boot ----------------------------------------------------------
-    const pre = document.createElement('pre');
-    pre.id = 'gf-braille';
-    pre.setAttribute('aria-hidden','true');
-    pre.style.cssText = [
-      'position:fixed', 'inset:0', 'margin:0', 'pointer-events:none',
-      'background:transparent', 'color:currentColor', 'line-height:1',
-      'white-space:pre', 'user-select:none', 'font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "IBM Plex Mono", monospace',
-      'font-size:12px'
-    ].join(';');
-    document.body.appendChild(pre);
-
-    // prefer small scanlines to blend into page
-    const style = document.createElement('style');
-    style.textContent = '#gf-braille{ mix-blend-mode:normal; opacity:.95 }\n@media (prefers-reduced-motion: reduce){ #gf-braille{ opacity:.85 } }';
-    document.head.appendChild(style);
+    // ---- Console-print mode (no DOM overlay) -------------------------------
+    const toParent = (msg)=>{ try{ parent.postMessage(msg, '*'); }catch(_){ } };
 
     // ---- Grid & measurement -----------------------------------------------
     function measureCell(){
@@ -98,7 +84,6 @@
     }
 
     let cols=0, rows=0, subW=0, subH=0, cw=8, ch=16;
-    let printBuf = [];
 
     function pickRes(){ return (cfg.res==='high')? 1.0 : (cfg.res==='low'? 0.70 : 0.85); }
     function resize(){
@@ -108,11 +93,8 @@
       cols = Math.max(60, Math.floor((innerWidth/cw)*scale) - pad);
       rows = Math.max(24, Math.floor((innerHeight/ch)*scale) - pad);
       subW = cols*2; subH = rows*4; // braille subcells
-      // printer buffer (matrix-like: scrolls upward)
-      const blank = String.fromCharCode(0x2800).repeat(cols);
-      printBuf = new Array(rows).fill(blank);
       ink = new Float32Array(subW*subH); // reset ink on resize
-      pre.textContent = '';
+      // parent can choose to keep history; do not clear
     }
 
     // ---- Ink buffer & renderer --------------------------------------------
@@ -155,12 +137,9 @@
       return line;
     }
     function printTick(){
-      // scroll up by one; append newest bottom row snapshot
-      if (!printBuf || !printBuf.length) return;
+      // send one line to parent CLI; parent appends as a new line (nowrap)
       const line = renderLine(rows-1);
-      printBuf.shift();
-      printBuf.push(line);
-      pre.textContent = printBuf.join('\n');
+      toParent({ type:'cb:print', line });
     }
 
     // ---- Particles ---------------------------------------------------------
