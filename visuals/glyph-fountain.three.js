@@ -110,29 +110,30 @@
       deposit(sx-1,sy, a); deposit(sx+1,sy, a);
       deposit(sx,sy-1, a); deposit(sx,sy+1, a);
     }
-    // Braille mapping (dy:0..3, dx:0..1)
-    function brailleMask(cx,cy, thr){
-      let mask=0;
+    // Cell intensity (average of 2x4 subcells)
+    function cellVal(cx,cy){
       const baseX=cx*2, baseY=cy*4;
-      const v = (dx,dy)=> ink[subIdx(baseX+dx, baseY+dy)] || 0;
-      // left column dots: 1,2,3,7 → indexes 0,1,2,6
-      if (v(0,0) > thr) mask |= (1<<0);
-      if (v(0,1) > thr) mask |= (1<<1);
-      if (v(0,2) > thr) mask |= (1<<2);
-      if (v(0,3) > thr) mask |= (1<<6);
-      // right column dots: 4,5,6,8 → indexes 3,4,5,7
-      if (v(1,0) > thr) mask |= (1<<3);
-      if (v(1,1) > thr) mask |= (1<<4);
-      if (v(1,2) > thr) mask |= (1<<5);
-      if (v(1,3) > thr) mask |= (1<<7);
-      return mask;
+      let acc=0, n=0;
+      for(let dy=0; dy<4; dy++){
+        for(let dx=0; dx<2; dx++){
+          const i = subIdx(baseX+dx, baseY+dy);
+          if (i>=0){ acc += ink[i]; n++; }
+        }
+      }
+      return n ? (acc/n) : 0;
+    }
+    // Code-like palette (no dot glyphs)
+    const codeChars = [' ','`','.',',',':',';','-','_','~','/','\\','|','(',')','[',']','{','}','<','>','+','=','*','#','%','@'];
+    function charFromVal(v){
+      const idx = Math.max(0, Math.min(codeChars.length-1, Math.floor(v * (codeChars.length-1))));
+      return codeChars[idx];
     }
     function renderLine(y){
-      const thrBase = 0.35 / Math.max(0.4, cfg.density);
+      // Map per-cell intensity to code-like characters
       let line='';
       for(let x=0;x<cols;x++){
-        const mask = brailleMask(x,y, thrBase);
-        line += String.fromCharCode(0x2800 + mask);
+        const v = cellVal(x,y) * cfg.density;
+        line += charFromVal(v);
       }
       return line;
     }
