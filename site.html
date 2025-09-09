@@ -911,101 +911,6 @@ const SOUNDS_CFG = {
 };
 const LS_SOUNDS = { index: 'cb.sounds.index.v1' };
 
-// === VISUALS (exactly like /sounds) =========================================
-const VIS = {
-  owner: 'cbassuarez',
-  repo:  'website-blog',
-  branch:'main',
-  path:  'visuals',
-  apiList(o,r,p,b){ return `https://api.github.com/repos/${o}/${r}/contents/${p}?ref=${b}`; },
-  rawBase(o,r,b){   return `https://raw.githubusercontent.com/${o}/${r}/${b}/`; },
-  ttlMs: 5*60*1000,
-};
-const LS_VIS = 'cb.visuals.index.v1';
-
-function visCacheGet(){
-  try{ const j = JSON.parse(localStorage.getItem(LS_VIS)||'null');
-       if (!j || !Array.isArray(j.items)) return null;
-       if (Date.now() - (j.ts||0) > VIS.ttlMs) return null;
-       return j.items;
-  }catch(_){ return null; }
-}
-function visCacheSet(items){
-  try{ localStorage.setItem(LS_VIS, JSON.stringify({ts:Date.now(), items})); }catch(_){}
-}
-function visRawJoin(suffix=''){
-  return VIS.rawBase(VIS.owner, VIS.repo, VIS.branch) + String(suffix||'').replace(/^\/+/, '');
-}
-async function visGithubList(){
-  const url = VIS.apiList(VIS.owner, VIS.repo, VIS.path, VIS.branch);
-  const res = await fetch(url, { headers:{Accept:'application/vnd.github+json'} });
-  if (!res.ok) throw new Error(`GitHub ${res.status}`);
-  return res.json(); // [{name,path,download_url,type}, ...]
-}
-function visInferEngine(name){
-  const n = String(name||'').toLowerCase();
-  if (n.endsWith('.hydra.js')) return 'hydra';
-  if (n.endsWith('.three.js')) return 'three';
-  return '';
-}
-function visInferSlug(name){
-  return String(name||'').replace(/\.(hydra|three)\.js$/i, '');
-}
-function visParseTitleFromFirstLine(text){
-  const first = String(text||'').replace(/\r\n/g,'\n').split('\n').find(l=>l.trim());
-  const m = first && first.match(/^\s*\/\/\s*title\s*[:=]\s*(.+)$/i);
-  return m ? m[1].trim() : '';
-}
-async function VIS_buildIndex({refresh=false} = {}){
-  if (!refresh){
-    const cached = visCacheGet();
-    if (cached) return cached;
-  }
-  const listing = await visGithubList();
-  const files   = listing.filter(x => x.type==='file' && visInferEngine(x.name));
-
-  const out = [];
-  let id = 1;
-  for (const f of files){
-    const engine = visInferEngine(f.name);
-    const slug   = visInferSlug(f.name);
-    let title    = slug.replace(/[-_]+/g,' ');
-
-    try{
-      const url  = f.download_url || visRawJoin(f.path || `${VIS.path}/${f.name}`);
-      const head = await fetch(url).then(r => r.ok ? r.text() : '');
-      const inlineTitle = visParseTitleFromFirstLine(head);
-      if (inlineTitle) title = inlineTitle;
-    }catch(_){}
-
-    out.push({
-      id: id++,
-      engine,
-      slug,
-      title,
-      path: f.path || `${VIS.path}/${f.name}`,
-      download_url: visRawJoin(f.path || `${VIS.path}/${f.name}`), // prefer raw.githubusercontent.com
-    });
-  }
-
-  out.sort((a,b)=> String(a.slug).localeCompare(String(b.slug)));
-  visCacheSet(out);
-  return out;
-}
-
-function buildVisualsHeader(list){
-  const idW = Math.max(2, ...list.map(p => String(p.id||'').length));
-  const header1 = `${'id'.padEnd(idW)}  engine  slug              name`;
-  const header2 = `${'-'.repeat(idW)}  ------  ----------------  ----`;
-  return [header1, header2];
-}
-function buildVisualsRows(list){
-  const idW = Math.max(2, ...list.map(p => String(p.id||'').length));
-  return list.map(p =>
-    `${String(p.id).padStart(idW,'0')}  ${String(p.engine||'').padEnd(6)}  ${String(p.slug||'').padEnd(16)}  ${p.title||''}`
-  );
-}
-
 
 function pushRoute(hash){
   const target = hash.startsWith('#') ? hash : '#'+hash;
@@ -1028,7 +933,7 @@ window.addEventListener('hashchange', () => {
     return;
   }
   const raw = (location.hash || '').replace(/^#/, '');
-if (/^(?:ls\/blog|blog|ls\/sounds|sounds|ls\/visuals|visuals)(?:$|\?)/i.test(raw)) return;
+  if (/^(?:ls\/blog|blog|ls\/sounds|sounds)(?:$|\/|\?)/i.test(raw)) return; // blog & sounds own handlers
   if (STATE.routingGuard) return;
   routeRender();
 });
@@ -1332,52 +1237,6 @@ async function update(ns, patch){
 // alias
 const set = update;
 
-async function renderVisualsList(flags=[]){
-  const refresh = flags.includes('--refresh') || flags.includes('-r');
-  let list = await VIS_buildIndex({ refresh });
-
-  // visuals -g engine:three | slug:foo | title:bar
-  const gi = flags.indexOf('-g');
-  if (gi>-1 && flags[gi+1]){
-    const [k,vRaw] = String(flags[gi+1]).split(':',2);
-    if (k && vRaw){
-      const v = vRaw.toLowerCase();
-      if (k==='engine') list = list.filter(p => String(p.engine||'').toLowerCase().includes(v));
-      if (k==='slug')   list = list.filter(p => String(p.slug||'').toLowerCase().includes(v));
-      if (k==='title' || k==='name')  list = list.filter(p => String(p.title||'').toLowerCase().includes(v));
-    }
-  }
-
-  clearScreen();
-  setDocTitle('visuals');
-  setPathSuffix('visuals');
-
-  const header = buildVisualsHeader(list);
-  const rows   = buildVisualsRows(list);
-  const rowsOrEmpty = rows.length ? rows : ['(no visual files found in /visuals)'];
-
-  // shareable hash like sounds
-  {
-    const raw = (location.hash || '').replace(/^#/, '');
-    const already = /^(?:ls\/visuals|visuals)(?:$|\?)/i.test(raw);
-    if (!already) {
-      const q = [];
-      if (refresh) q.push('refresh=1');
-      if (gi>-1 && flags[gi+1]) q.push('g='+encodeURIComponent(flags[gi+1]));
-      pushRoute('ls/visuals' + (q.length?('?'+q.join('&')):''));
-    }
-  }
-
-  await startPager({
-    preface: header,          // ARRAY OF LINES (prevents vertical “garbage”)
-    rows: rowsOrEmpty,
-    pageSize: 10,
-    onDone: async () => {
-      await println('\nCommands: [ visuals run <id|slug> ] [ visuals stop <ns|all> ] [ back ]', {nowrap:true});
-    }
-  });
-  Sprite.on();
-}
 
 // --- Inline meta (first line) ----------------------------------------------
 // Recognized keys: date, type, slug, tags, title
@@ -2187,70 +2046,6 @@ return { run, stop, list, unlock, update, set };
 
 })();
 window.SoundEngines = SoundEngines;
-
-// Small, isolated runner (iframe) — mirrors SoundEngines API shape
-const VisualsRunner = (() => {
-  const running = new Map();
-  function ensureStage(){
-    let stage = document.getElementById('cb-visuals-stage');
-    if (!stage){
-      stage = document.createElement('div');
-      stage.id = 'cb-visuals-stage';
-      stage.style.cssText = 'position:fixed;inset:0;z-index:9998;display:none;background:transparent';
-      const iframeStyle = document.createElement('style');
-      iframeStyle.textContent = '#cb-visuals-stage iframe{position:absolute;inset:0;width:100%;height:100%;border:0}';
-      document.head.appendChild(iframeStyle);
-      const consoleEl = document.getElementById('cb-console');
-      (consoleEl?.parentNode || document.body).insertBefore(stage, consoleEl || null);
-    }
-    return stage;
-  }
-  function maybeJsDelivr(u){
-    const m = String(u||'').match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/i);
-    return m ? `https://cdn.jsdelivr.net/gh/${m[1]}/${m[2]}@${m[3]}/${m[4]}` : u;
-  }
-  function srcdocFor(engine, srcUrl){
-    const lib = engine==='hydra'
-      ? `<script src="https://unpkg.com/hydra-synth"></script>`
-      : `<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>`;
-    const pre = `
-      <style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}</style>
-      <script>(function(){try{const ch=new BroadcastChannel('cb.audio.bus');window.CB_AUDIO={rms:0,peak:0,bands:[]};ch.onmessage=(e)=>{if(e&&e.data)window.CB_AUDIO=e.data;};}catch(_){}})();</script>
-    `;
-    return `<html><head>${pre}</head><body>${lib}<script src="${srcUrl}"></script></body></html>`;
-  }
-  async function run({engine, srcUrl, ns}){
-    const stage = ensureStage();
-    stage.style.display = 'block';
-    const iframe = document.createElement('iframe');
-    iframe.srcdoc = srcdocFor(engine, maybeJsDelivr(srcUrl));
-    stage.appendChild(iframe);
-    const name = ns || `v${running.size+1}`;
-    running.set(name, {engine, iframe});
-    return name;
-  }
-  function stop(target=''){
-    if (target==='all'){
-      for (const [k,r] of running){ try{ r.iframe.remove(); }catch(_){} }
-      running.clear();
-      ensureStage().style.display = 'none';
-      return true;
-    }
-    const r = running.get(target);
-    if (!r) return false;
-    try{ r.iframe.remove(); }catch(_){}
-    running.delete(target);
-    if (!running.size) ensureStage().style.display = 'none';
-    return true;
-  }
-  function set(ns, patch){
-    const r = running.get(ns);
-    if (!r) return false;
-    try{ r.iframe.contentWindow?.postMessage({type:'cb:set', patch}, '*'); return true; }catch(_){ return false; }
-  }
-  return { run, stop, set };
-})();
-
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Split Manager (two-pane UI inside #cb-screen; ASCII style; 60/40; meters)
@@ -4060,43 +3855,6 @@ async function startLinkPicker(w){
        COMMANDS
     ----------------------------- */
     const COMMANDS = {
-      visuals: async function (...args){
-  const sub = String(args[0]||'').toLowerCase();
-
-  if (!sub || sub.startsWith('-')) return renderVisualsList(args);
-  if (sub === 'list') return renderVisualsList(args.slice(1));
-
-  if (sub === 'run'){
-    const list = await VIS_buildIndex({});
-    const sel  = String(args[1]||'').trim().toLowerCase();
-    if (!sel) return println('usage: visuals run <id|slug>');
-
-    let rec = /^\d+$/.test(sel) ? list.find(x => x.id === Number(sel))
-                                : list.find(x => x.slug.toLowerCase() === sel);
-    if (!rec) return println('(not found)');
-
-    const ns = await VisualsRunner.run({
-      engine: rec.engine,
-      srcUrl: rec.download_url
-    });
-    return println(`[${ns}] ${rec.engine} → ${rec.slug}`);
-  }
-
-  if (sub === '--refresh' || sub === 'refresh' || sub === '-r'){
-    localStorage.removeItem(LS_VIS);
-    return renderVisualsList(['--refresh']);
-  }
-
-  if (sub === 'stop'){
-    const tgt = String(args[1]||'all').toLowerCase();
-    if (tgt === 'all'){ VisualsRunner.stop('all'); return println('(stopped all visuals)'); }
-    return println( VisualsRunner.stop(tgt) ? `(stopped ${tgt})` : '(no such visual namespace)' );
-  }
-
-  await println('usage: visuals [list|run|stop|--refresh]');
-  return renderVisualsList([]);
-},
-
       set: async function (...args){
   const printlnSafe = async (s, opts) => (typeof println === 'function' ? println(s, opts) : console.log(s));
   const usage = async () => printlnSafe(
