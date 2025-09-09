@@ -98,7 +98,7 @@
     }
 
     let cols=0, rows=0, subW=0, subH=0, cw=8, ch=16;
-    let textLines = [];
+    let printBuf = [];
 
     function pickRes(){ return (cfg.res==='high')? 1.0 : (cfg.res==='low'? 0.70 : 0.85); }
     function resize(){
@@ -108,7 +108,9 @@
       cols = Math.max(60, Math.floor((innerWidth/cw)*scale) - pad);
       rows = Math.max(24, Math.floor((innerHeight/ch)*scale) - pad);
       subW = cols*2; subH = rows*4; // braille subcells
-      textLines = new Array(rows);
+      // printer buffer (matrix-like: scrolls upward)
+      const blank = String.fromCharCode(0x2800).repeat(cols);
+      printBuf = new Array(rows).fill(blank);
       ink = new Float32Array(subW*subH); // reset ink on resize
       pre.textContent = '';
     }
@@ -143,17 +145,22 @@
       if (v(1,3) > thr) mask |= (1<<7);
       return mask;
     }
-    function renderText(){
+    function renderLine(y){
       const thrBase = 0.35 / Math.max(0.4, cfg.density);
-      for(let y=0;y<rows;y++){
-        let line='';
-        for(let x=0;x<cols;x++){
-          const mask = brailleMask(x,y, thrBase);
-          line += String.fromCharCode(0x2800 + mask);
-        }
-        textLines[y] = line;
+      let line='';
+      for(let x=0;x<cols;x++){
+        const mask = brailleMask(x,y, thrBase);
+        line += String.fromCharCode(0x2800 + mask);
       }
-      pre.textContent = textLines.join('\n');
+      return line;
+    }
+    function printTick(){
+      // scroll up by one; append newest bottom row snapshot
+      if (!printBuf || !printBuf.length) return;
+      const line = renderLine(rows-1);
+      printBuf.shift();
+      printBuf.push(line);
+      pre.textContent = printBuf.join('\n');
     }
 
     // ---- Particles ---------------------------------------------------------
@@ -293,7 +300,8 @@
         }
       }
 
-      renderText();
+      // print one line per frame to emulate CLI stream
+      printTick();
       requestAnimationFrame(step);
     }
 
@@ -328,4 +336,3 @@
 
   }catch(err){ console.error('GlyphFountain failed', err); }
 })();
-
