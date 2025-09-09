@@ -1,6 +1,4 @@
-// title: Rotating Cube — quick test
-
-import * as THREE from 'three';
+// title: Rotating Cube — quick test (no imports)
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
@@ -13,7 +11,6 @@ const geometry = new THREE.BoxGeometry();
 const material = new THREE.MeshNormalMaterial();
 const cube = new THREE.Mesh(geometry, material);
 scene.add(cube);
-
 camera.position.z = 3;
 
 function animate(){
@@ -23,3 +20,13 @@ function animate(){
   renderer.render(scene, camera);
 }
 animate();
+
+// optional: react a bit to audio rms if present
+if (typeof METRICS !== 'undefined'){
+  const orig = material.clone();
+  (function pulse(){
+    requestAnimationFrame(pulse);
+    const s = 1 + (METRICS.rms||0) * 4;
+    cube.scale.set(s,s,s);
+  })();
+}
