@@ -911,51 +911,86 @@ const SOUNDS_CFG = {
 };
 const LS_SOUNDS = { index: 'cb.sounds.index.v1' };
 
-// === Visuals config / cache keys (mirrors /sounds) ===
-const VISUALS_CFG = {
+// === VISUALS (exactly like /sounds) =========================================
+const VIS = {
   owner: 'cbassuarez',
   repo:  'website-blog',
   branch:'main',
   path:  'visuals',
-  apiList: (owner,repo,path,branch) =>
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`,
-  rawBase: (owner,repo,branch) =>
-    `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/`,
-  ttlMs: 5*60*1000
+  apiList(o,r,p,b){ return `https://api.github.com/repos/${o}/${r}/contents/${p}?ref=${b}`; },
+  rawBase(o,r,b){   return `https://raw.githubusercontent.com/${o}/${r}/${b}/`; },
+  ttlMs: 5*60*1000,
 };
-const LS_VISUALS = { index: 'cb.visuals.index.v1' };
+const LS_VIS = 'cb.visuals.index.v1';
 
-// cache helpers
-function visualsCacheGet(){
-  const hit = LS.get(LS_VISUALS.index, null);
-  if (!hit) return null;
-  if (Date.now() - (hit.t||0) > VISUALS_CFG.ttlMs) return null;
-  return hit.items || null;
+function visCacheGet(){
+  try{ const j = JSON.parse(localStorage.getItem(LS_VIS)||'null');
+       if (!j || !Array.isArray(j.items)) return null;
+       if (Date.now() - (j.ts||0) > VIS.ttlMs) return null;
+       return j.items;
+  }catch(_){ return null; }
 }
-function visualsCacheSet(items){
-  try { LS.set(LS_VISUALS.index, {t:Date.now(), items}); } catch(_){}
+function visCacheSet(items){
+  try{ localStorage.setItem(LS_VIS, JSON.stringify({ts:Date.now(), items})); }catch(_){}
 }
-
-// list GitHub folder (same shape as sounds/blog)
-async function githubListVisuals(){
-  const url = VISUALS_CFG.apiList(VISUALS_CFG.owner, VISUALS_CFG.repo, VISUALS_CFG.path, VISUALS_CFG.branch);
-  const r = await fetch(url, {headers:{'Accept':'application/vnd.github+json'}});
-  if (!r.ok) throw new Error('visuals list fetch failed');
-  return await r.json(); // array of {name, path, download_url, type}
+function visRawJoin(suffix=''){
+  return VIS.rawBase(VIS.owner, VIS.repo, VIS.branch) + String(suffix||'').replace(/^\/+/, '');
 }
-
-// raw URL join (raw.githubusercontent.com)
-function rawJoinVisuals(suffix=''){
-  return VISUALS_CFG.rawBase(VISUALS_CFG.owner, VISUALS_CFG.repo, VISUALS_CFG.branch)
-         + String(suffix||'').replace(/^\/+/,'');
+async function visGithubList(){
+  const url = VIS.apiList(VIS.owner, VIS.repo, VIS.path, VIS.branch);
+  const res = await fetch(url, { headers:{Accept:'application/vnd.github+json'} });
+  if (!res.ok) throw new Error(`GitHub ${res.status}`);
+  return res.json(); // [{name,path,download_url,type}, ...]
 }
-
-// engine from filename; slug from basename
-function inferVisualEngineFromPath(name){
+function visInferEngine(name){
   const n = String(name||'').toLowerCase();
   if (n.endsWith('.hydra.js')) return 'hydra';
   if (n.endsWith('.three.js')) return 'three';
   return '';
+}
+function visInferSlug(name){
+  return String(name||'').replace(/\.(hydra|three)\.js$/i, '');
+}
+function visParseTitleFromFirstLine(text){
+  const first = String(text||'').replace(/\r\n/g,'\n').split('\n').find(l=>l.trim());
+  const m = first && first.match(/^\s*\/\/\s*title\s*[:=]\s*(.+)$/i);
+  return m ? m[1].trim() : '';
+}
+async function VIS_buildIndex({refresh=false} = {}){
+  if (!refresh){
+    const cached = visCacheGet();
+    if (cached) return cached;
+  }
+  const listing = await visGithubList();
+  const files   = listing.filter(x => x.type==='file' && visInferEngine(x.name));
+
+  const out = [];
+  let id = 1;
+  for (const f of files){
+    const engine = visInferEngine(f.name);
+    const slug   = visInferSlug(f.name);
+    let title    = slug.replace(/[-_]+/g,' ');
+
+    try{
+      const url  = f.download_url || visRawJoin(f.path || `${VIS.path}/${f.name}`);
+      const head = await fetch(url).then(r => r.ok ? r.text() : '');
+      const inlineTitle = visParseTitleFromFirstLine(head);
+      if (inlineTitle) title = inlineTitle;
+    }catch(_){}
+
+    out.push({
+      id: id++,
+      engine,
+      slug,
+      title,
+      path: f.path || `${VIS.path}/${f.name}`,
+      download_url: visRawJoin(f.path || `${VIS.path}/${f.name}`), // prefer raw.githubusercontent.com
+    });
+  }
+
+  out.sort((a,b)=> String(a.slug).localeCompare(String(b.slug)));
+  visCacheSet(out);
+  return out;
 }
 
 function buildVisualsHeader(list){
@@ -969,94 +1004,6 @@ function buildVisualsRows(list){
   return list.map(p =>
     `${String(p.id).padStart(idW,'0')}  ${String(p.engine||'').padEnd(6)}  ${String(p.slug||'').padEnd(16)}  ${p.title||''}`
   );
-}
-
-// identical to buildSoundsIndex, but uses visuals config + engine mapping
-async function buildVisualsIndex({ refresh=false } = {}){
-  if (!refresh){
-    const cached = visualsCacheGet();
-    if (cached) return cached;
-  }
-  const listing = await githubListVisuals();
-
-  const files = listing.filter(x => x.type === 'file' && inferVisualEngineFromPath(x.name));
-
-  const items = [];
-  let id = 1;
-  for (const f of files){
-    const engine = inferVisualEngineFromPath(f.name);
-    const slug = f.name.replace(/\.(hydra|three)\.js$/i,'');
-    let title = slug.replace(/[-_]+/g,' ');
-
-    // read first few lines for optional inline meta (// title: …)
-    let meta = {};
-    try {
-      const url = f.download_url || rawJoinVisuals(f.path || `${VISUALS_CFG.path}/${f.name}`);
-      const txt = await fetch(url, {method:'GET'}).then(r => r.ok ? r.text() : '');
-      meta = parseInlineMetaFromCode(txt);
-      if (meta.title) title = meta.title;
-    } catch(_){}
-
-    items.push({
-      id: id++,
-      engine: (meta.engine || engine || '').toLowerCase(),
-      slug,
-      title,
-      path: f.path || `${VISUALS_CFG.path}/${f.name}`,
-      download_url: f.download_url || rawJoinVisuals(f.path || `${VISUALS_CFG.path}/${f.name}`)
-    });
-  }
-
-  items.sort((a,b)=> String(a.slug).localeCompare(String(b.slug)));
-  visualsCacheSet(items);
-  return items;
-}
-
-// list renderer (same contract as renderSoundsList)
-async function renderVisualsList(flags=[]){
-  const refresh = flags.includes('--refresh') || flags.includes('-r');
-  let list = await buildVisualsIndex({ refresh });
-
-  // visuals -g engine:hydra|three / slug: / title:
-  const gi = flags.indexOf('-g');
-  if (gi>-1 && flags[gi+1]){
-    const [k,vRaw] = String(flags[gi+1]).split(':',2);
-    if (k && vRaw){
-      const v = vRaw.toLowerCase();
-      if (k==='engine') list = list.filter(p => String(p.engine||'').toLowerCase().includes(v));
-      if (k==='slug')   list = list.filter(p => String(p.slug||'').toLowerCase().includes(v));
-      if (k==='title')  list = list.filter(p => String(p.title||'').toLowerCase().includes(v));
-    }
-  }
-
-  clearScreen();
-  setDocTitle('visuals');
-  setPathSuffix('visuals');
-
-  const header = buildVisualsHeader(list);
-  const rows   = buildVisualsRows(list);
-
-  // shareable hash, like sounds
-  {
-    const raw = (location.hash || '').replace(/^#/, '');
-    const alreadyOnList = /^(?:ls\/visuals|visuals)(?:$|\?)/i.test(raw);
-    if (!alreadyOnList) {
-      const q = [];
-      if (refresh) q.push('refresh=1');
-      if (gi>-1 && flags[gi+1]) q.push('g='+encodeURIComponent(flags[gi+1]));
-      pushRoute('ls/visuals' + (q.length?('?'+q.join('&')):''));
-    }
-  }
-
-  await startPager({
-    preface: header,
-    rows,
-    pageSize: 10,
-    onDone: async () => {
-      await println('\nCommands: [ visuals run <id|slug> ] [ visuals stop <ns|all> ] [ back ]', {nowrap:true});
-    }
-  });
-  Sprite.on();
 }
 
 
@@ -1081,7 +1028,7 @@ window.addEventListener('hashchange', () => {
     return;
   }
   const raw = (location.hash || '').replace(/^#/, '');
-  if (/^(?:ls\/blog|blog|ls\/sounds|sounds|ls\/visuals|visuals)(?:$|\?)/i.test(raw)) return; // blog/sounds/visuals have their own handlers
+if (/^(?:ls\/blog|blog|ls\/sounds|sounds|ls\/visuals|visuals)(?:$|\?)/i.test(raw)) return;
   if (STATE.routingGuard) return;
   routeRender();
 });
@@ -1385,6 +1332,52 @@ async function update(ns, patch){
 // alias
 const set = update;
 
+async function renderVisualsList(flags=[]){
+  const refresh = flags.includes('--refresh') || flags.includes('-r');
+  let list = await VIS_buildIndex({ refresh });
+
+  // visuals -g engine:three | slug:foo | title:bar
+  const gi = flags.indexOf('-g');
+  if (gi>-1 && flags[gi+1]){
+    const [k,vRaw] = String(flags[gi+1]).split(':',2);
+    if (k && vRaw){
+      const v = vRaw.toLowerCase();
+      if (k==='engine') list = list.filter(p => String(p.engine||'').toLowerCase().includes(v));
+      if (k==='slug')   list = list.filter(p => String(p.slug||'').toLowerCase().includes(v));
+      if (k==='title' || k==='name')  list = list.filter(p => String(p.title||'').toLowerCase().includes(v));
+    }
+  }
+
+  clearScreen();
+  setDocTitle('visuals');
+  setPathSuffix('visuals');
+
+  const header = buildVisualsHeader(list);
+  const rows   = buildVisualsRows(list);
+  const rowsOrEmpty = rows.length ? rows : ['(no visual files found in /visuals)'];
+
+  // shareable hash like sounds
+  {
+    const raw = (location.hash || '').replace(/^#/, '');
+    const already = /^(?:ls\/visuals|visuals)(?:$|\?)/i.test(raw);
+    if (!already) {
+      const q = [];
+      if (refresh) q.push('refresh=1');
+      if (gi>-1 && flags[gi+1]) q.push('g='+encodeURIComponent(flags[gi+1]));
+      pushRoute('ls/visuals' + (q.length?('?'+q.join('&')):''));
+    }
+  }
+
+  await startPager({
+    preface: header,          // ARRAY OF LINES (prevents vertical “garbage”)
+    rows: rowsOrEmpty,
+    pageSize: 10,
+    onDone: async () => {
+      await println('\nCommands: [ visuals run <id|slug> ] [ visuals stop <ns|all> ] [ back ]', {nowrap:true});
+    }
+  });
+  Sprite.on();
+}
 
 // --- Inline meta (first line) ----------------------------------------------
 // Recognized keys: date, type, slug, tags, title
@@ -2195,144 +2188,74 @@ return { run, stop, list, unlock, update, set };
 })();
 window.SoundEngines = SoundEngines;
 
-
-// === VisualEngines (iframe sandbox; Hydra/Three) ============================
-const VisualEngines = (() => {
-  const running = new Map(); // ns -> {engine, iframe}
-  let styleInjected = false;
-
-  function injectStyleOnce(){
-    if (styleInjected) return;
-    styleInjected = true;
-    const css = `
-      #cb-visuals-stage{ position:fixed; inset:0; z-index: 999998; background: transparent; display:none; }
-      #cb-visuals-stage.on{ display:block; }
-      /* console above, but let visuals shine through */
-      #cb-console{ background: rgba(0,0,0,.55); }
-      #cb-visuals-stage.fullscreen + #cb-console{ background: rgba(0,0,0,.35); }
-      #cb-visuals-stage iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
-    `;
-    const s = document.createElement('style'); s.textContent = css;
-    document.head.appendChild(s);
-  }
-
+// Small, isolated runner (iframe) — mirrors SoundEngines API shape
+const VisualsRunner = (() => {
+  const running = new Map();
   function ensureStage(){
-    injectStyleOnce();
     let stage = document.getElementById('cb-visuals-stage');
     if (!stage){
       stage = document.createElement('div');
       stage.id = 'cb-visuals-stage';
+      stage.style.cssText = 'position:fixed;inset:0;z-index:9998;display:none;background:transparent';
+      const iframeStyle = document.createElement('style');
+      iframeStyle.textContent = '#cb-visuals-stage iframe{position:absolute;inset:0;width:100%;height:100%;border:0}';
+      document.head.appendChild(iframeStyle);
       const consoleEl = document.getElementById('cb-console');
-      // insert behind console
-      if (consoleEl && consoleEl.parentNode){
-        consoleEl.parentNode.insertBefore(stage, consoleEl);
-      } else {
-        document.body.appendChild(stage);
-      }
+      (consoleEl?.parentNode || document.body).insertBefore(stage, consoleEl || null);
     }
     return stage;
   }
-
-  function fullscreen(on){
-    ensureStage().classList.toggle('fullscreen', !!on);
-  }
-  function pickNs(base='v'){ let i=1; while (running.has(base+i)) i++; return base+i; }
-
-  // Normalize GitHub raw to jsDelivr (fewer CORS/MIME headaches)
   function maybeJsDelivr(u){
-    try{
-      const m = String(u||'').match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/i);
-      return m ? `https://cdn.jsdelivr.net/gh/${m[1]}/${m[2]}@${m[3]}/${m[4]}` : u;
-    }catch(_){ return u; }
+    const m = String(u||'').match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/i);
+    return m ? `https://cdn.jsdelivr.net/gh/${m[1]}/${m[2]}@${m[3]}/${m[4]}` : u;
   }
-
-  function srcdocFor({engine, srcUrl}){
-    const libs =
-      engine === 'hydra'
-        ? `<script src="https://unpkg.com/hydra-synth"></script>`
-        : `<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>`;
-    // audio metrics bus
-    const prelude = `
+  function srcdocFor(engine, srcUrl){
+    const lib = engine==='hydra'
+      ? `<script src="https://unpkg.com/hydra-synth"></script>`
+      : `<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>`;
+    const pre = `
       <style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}</style>
-      <script>
-        (function(){
-          try{
-            const ch = new BroadcastChannel('cb.audio.bus');
-            window.CB_AUDIO = {rms:0, peak:0, bands:[]};
-            ch.onmessage = (e)=>{ if(e && e.data) window.CB_AUDIO = e.data; };
-          }catch(_){}
-          // simple log proxy back to parent (optional)
-          window.addEventListener('error', e=>{ try{ parent.postMessage({type:'cb:err', msg:String(e.error||e.message||e)}, '*'); }catch(_){} });
-          console.log = new Proxy(console.log, {apply(t,th,args){ try{ parent.postMessage({type:'cb:log', args}, '*'); }catch(_){} return Reflect.apply(t,th,args); }});
-        })();
-      </script>
+      <script>(function(){try{const ch=new BroadcastChannel('cb.audio.bus');window.CB_AUDIO={rms:0,peak:0,bands:[]};ch.onmessage=(e)=>{if(e&&e.data)window.CB_AUDIO=e.data;};}catch(_){}})();</script>
     `;
-    const user = `<script src="${srcUrl}"></script>`;
-    return `<html><head>${prelude}</head><body>${libs}${user}</body></html>`;
+    return `<html><head>${pre}</head><body>${lib}<script src="${srcUrl}"></script></body></html>`;
   }
-
-  async function run({engine, srcUrl, minFps=24, ns}){
-    if (!engine) throw new Error('visual engine missing');
-    srcUrl = maybeJsDelivr(srcUrl);
-
+  async function run({engine, srcUrl, ns}){
     const stage = ensureStage();
-    stage.classList.add('on'); // visible behind console
-    fullscreen(true);
-
-    if (!ns) ns = pickNs('v');
-
+    stage.style.display = 'block';
     const iframe = document.createElement('iframe');
-    iframe.className = 'v-sandbox';
-    iframe.setAttribute('allow', 'autoplay; fullscreen; xr-spatial-tracking; cross-origin-isolated');
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-pointer-lock allow-modals');
-    iframe.srcdoc = srcdocFor({engine, srcUrl});
-
+    iframe.srcdoc = srcdocFor(engine, maybeJsDelivr(srcUrl));
     stage.appendChild(iframe);
-    running.set(ns, {engine, iframe});
-    return ns;
+    const name = ns || `v${running.size+1}`;
+    running.set(name, {engine, iframe});
+    return name;
   }
-
   function stop(target=''){
-    if (target === 'all'){
-      for (const [k, r] of running){ try{ r.iframe.remove(); }catch(_){}
-        running.delete(k);
-      }
-      const stage = ensureStage();
-      stage.classList.remove('on'); stage.classList.remove('fullscreen');
+    if (target==='all'){
+      for (const [k,r] of running){ try{ r.iframe.remove(); }catch(_){} }
+      running.clear();
+      ensureStage().style.display = 'none';
       return true;
     }
     const r = running.get(target);
     if (!r) return false;
     try{ r.iframe.remove(); }catch(_){}
     running.delete(target);
-    if (running.size === 0){
-      const stage = ensureStage();
-      stage.classList.remove('on'); stage.classList.remove('fullscreen');
-    }
+    if (!running.size) ensureStage().style.display = 'none';
     return true;
   }
-
   function set(ns, patch){
-    // hand wave: post to child frame if you later support param messages
     const r = running.get(ns);
     if (!r) return false;
-    try { r.iframe.contentWindow?.postMessage({type:'cb:set', patch}, '*'); return true; }
-    catch(_){ return false; }
+    try{ r.iframe.contentWindow?.postMessage({type:'cb:set', patch}, '*'); return true; }catch(_){ return false; }
   }
-
-  return { run, stop, set, fullscreen };
+  return { run, stop, set };
 })();
-window.VisualEngines = VisualEngines;
 
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Split Manager (two-pane UI inside #cb-screen; ASCII style; 60/40; meters)
 // ───────────────────────────────────────────────────────────────────────────────
 (() => {
-  // shared cross-tab metrics bus
-let __cbAudioBus; 
-try { __cbAudioBus = new BroadcastChannel('cb.audio.bus'); } catch(_){}
-
   const MIN_COL = 20; // min characters for each pane
   const MOBILE_MIN_PX = 820; // disable split under this width
   const LS_KEY = 'cb_split_state_v1';
@@ -2462,87 +2385,28 @@ try { __cbAudioBus = new BroadcastChannel('cb.audio.bus'); } catch(_){}
     // use pipes style overall; bars are ascii
   }
   function pumpMeters(){
-  if (!state.open) return;
-
-  const lines = [];
-  const { cols: colsR } = rowsCols();
-  lines.push(headerLine('LIVE OUTPUT', colsR));
-
-  // show latest console lines if hooked
-  if (__SplitLog.length){
-    const recent = __SplitLog.slice(-20);
-    for (const ln of recent) lines.push(ln + '\n');
-    lines.push(horizRule(colsR));
-  }
-
-  // collect analysers from running sounds
-  const runs = (window.SoundEngines && SoundEngines.list && SoundEngines.list()) || [];
-  const analysers = runs.map(r => r.analyser).filter(Boolean);
-
-  // draw simple per-ns bars
-  function rmsDb(an){
-    const buf = new Uint8Array(an.frequencyBinCount);
-    an.getByteTimeDomainData(buf);
-    let sum=0, pk=0;
-    for (let i=0;i<buf.length;i++){
-      const x=(buf[i]-128)/128;
-      sum += x*x;
-      const a = Math.abs(x);
-      if (a > pk) pk = a;
+    if (!state.open) return;
+    const lines = [];
+    // header
+    const { cols: colsR } = rowsCols();
+    lines.push(headerLine('LIVE OUTPUT', colsR));
+    // show latest console lines (if we’ve hooked logging)
+    if (__SplitLog.length){
+      const recent = __SplitLog.slice(-20);
+      for (const ln of recent) lines.push(ln + '\n');
+      lines.push(horizRule(colsR));
     }
-    const rms = Math.sqrt(sum / buf.length) || 0;
-    const db = 20 * Math.log10(rms || 1e-6);
-    return { db: Math.max(-60, Math.min(0, db)), rms, peak: pk };
-  }
-  function bar(db){
-    const norm = Math.max(0, Math.min(1, (db + 60)/60));
-    const width = 24;
-    const n = Math.round(norm * width);
-    return `[${'#'.repeat(n)}${'.'.repeat(width-n)}] ${db.toFixed(0)}dB`;
-  }
-
-  for (const r of runs){
-    const an = r.analyser;
-    if (!an) continue;
-    const { db } = rmsDb(an);
-    lines.push(` ${r.ns} ${r.item?.slug||''} ${bar(db)}\n`);
-  }
-  right.textContent = lines.join('');
-
-  // === NEW: mixed metrics bus publish (rms 0..1, peak 0..1, bands[16] 0..1) ===
-  if (__cbAudioBus && analysers.length){
-    // mix time-domain
-    let rmsSum = 0, peakMax = 0;
-    for (const an of analysers){
-      const { rms, peak } = rmsDb(an);
-      rmsSum += rms; if (peak > peakMax) peakMax = peak;
+    // meters
+    const runs = (window.SoundEngines && SoundEngines.list && SoundEngines.list()) || [];
+    for (const r of runs){
+      const an = meters.get(r.ns)?.analyser || r.analyser;
+      if (!an) continue;
+      const db = rmsFromAnalyser(an);
+      lines.push(` ${r.ns} ${r.item?.slug||''} ${bar(db)}\n`);
     }
-    const rmsMixed = rmsSum / analysers.length;
-    const peakMixed = peakMax;
-
-    // mix frequency-domain into 16 coarse bands
-    const nBands = 16;
-    const bands = new Array(nBands).fill(0);
-    for (const an of analysers){
-      const spec = new Uint8Array(an.frequencyBinCount);
-      an.getByteFrequencyData(spec); // 0..255
-      // log-ish binning (simple)
-      for (let b=0; b<nBands; b++){
-        const lo = Math.floor((b    )/nBands * spec.length);
-        const hi = Math.floor((b + 1)/nBands * spec.length);
-        let sum=0, cnt=0;
-        for (let i=lo;i<hi;i++){ sum += spec[i]; cnt++; }
-        const v = cnt ? (sum/cnt)/255 : 0;
-        if (v > bands[b]) bands[b] = v; // take max across runs
-      }
-    }
-
-    try { __cbAudioBus.postMessage({ rms: rmsMixed, peak: peakMixed, bands }); } catch(_){}
+    right.textContent = lines.join('');
+    meterRAF = requestAnimationFrame(pumpMeters);
   }
-
-  meterRAF = requestAnimationFrame(pumpMeters);
-}
-
 
   // hook into SoundEngines: when a run starts, attach analyser to its bus
   function hookEngines(){
@@ -2830,13 +2694,6 @@ sprite on|off
 sprite set <note|streetlight|cursor>
 sprite speed <slow|medium|lively>
 wave | dance | sleep | blink | flicker
-
-# Visuals
-visuals [--refresh] [-g key:value]
-visuals run <id|slug>
-visuals stop <ns|all>
-visuals set vN <key> <value>
-visuals fullscreen [on|off]
 `.trim();
 
 async function contactWizardHandleInput(raw){
@@ -4203,60 +4060,40 @@ async function startLinkPicker(w){
        COMMANDS
     ----------------------------- */
     const COMMANDS = {
-
       visuals: async function (...args){
   const sub = String(args[0]||'').toLowerCase();
 
-  // default: list (like sounds/blog)
   if (!sub || sub.startsWith('-')) return renderVisualsList(args);
   if (sub === 'list') return renderVisualsList(args.slice(1));
 
   if (sub === 'run'){
-    const list = await buildVisualsIndex({});
+    const list = await VIS_buildIndex({});
     const sel  = String(args[1]||'').trim().toLowerCase();
     if (!sel) return println('usage: visuals run <id|slug>');
 
-    let rec = null;
-    if (/^\d+$/.test(sel)) rec = list.find(x => x.id === Number(sel));
-    else                   rec = list.find(x => x.slug.toLowerCase() === sel);
-
+    let rec = /^\d+$/.test(sel) ? list.find(x => x.id === Number(sel))
+                                : list.find(x => x.slug.toLowerCase() === sel);
     if (!rec) return println('(not found)');
 
-    const ns = await VisualEngines.run({
+    const ns = await VisualsRunner.run({
       engine: rec.engine,
-      srcUrl: rec.download_url,
-      minFps: 24
+      srcUrl: rec.download_url
     });
     return println(`[${ns}] ${rec.engine} → ${rec.slug}`);
   }
 
   if (sub === '--refresh' || sub === 'refresh' || sub === '-r'){
-    localStorage.removeItem(LS_VISUALS.index);
+    localStorage.removeItem(LS_VIS);
     return renderVisualsList(['--refresh']);
   }
 
   if (sub === 'stop'){
     const tgt = String(args[1]||'all').toLowerCase();
-    if (tgt === 'all'){ VisualEngines.stop('all'); return println('(stopped all visuals)'); }
-    return println( VisualEngines.stop(tgt) ? `(stopped ${tgt})` : '(no such visual namespace)' );
+    if (tgt === 'all'){ VisualsRunner.stop('all'); return println('(stopped all visuals)'); }
+    return println( VisualsRunner.stop(tgt) ? `(stopped ${tgt})` : '(no such visual namespace)' );
   }
 
-  if (sub === 'set'){
-    const ns = String(args[1]||'');
-    const key= String(args[2]||'');
-    const val= args.slice(3).join(' ');
-    if (!/^v\d+$/i.test(ns) || !key) return println('usage: visuals set vN key value');
-    return println( VisualEngines.set(ns, {key, value:val}) ? `(set ${ns} ${key}=${val})` : '(failed)' );
-  }
-
-  if (sub === 'fullscreen'){
-    const onoff = String(args[1]||'').toLowerCase();
-    VisualEngines.fullscreen(onoff!=='off');
-    return println(onoff==='off' ? '(fullscreen off)' : '(fullscreen on)');
-  }
-
-  // fallback: help + list
-  await println('usage: visuals [list|run|stop|set|fullscreen|--refresh]');
+  await println('usage: visuals [list|run|stop|--refresh]');
   return renderVisualsList([]);
 },
 
