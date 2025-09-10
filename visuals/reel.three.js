@@ -1,4 +1,5 @@
 // title: reel  — Typographic Film-Reel — Three.js math, pure CLI text output
+#!/usr/bin/env node
 /**
  * Typographic Film-Reel — Three.js math, pure CLI text output
  *
@@ -15,6 +16,7 @@
  *  - node reel.js --fit --color mono --dither err --gamma 1.15
  */
 
+import * as THREE from 'three';
 
 // --------------------------- CLI Parsing -----------------------------------
 const args = process.argv.slice(2);
@@ -294,6 +296,11 @@ function tick(){
   row++;
   if (row >= maxRows){ process.exit(0); }
 }
+
+// Pace output by rate
+const interval = setInterval(tick, Math.max(1, Math.floor(1000/rate)));
+process.on('exit', ()=> clearInterval(interval));
+
 
 // Pace output by rate
 const interval = setInterval(tick, Math.max(1, Math.floor(1000/rate)));
